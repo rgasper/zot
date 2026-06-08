@@ -180,3 +180,61 @@ func TestCanonicalProviderAliasesAreKnown(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveEnvironmentVariableAuthWithoutConfiguredProvider reproduces
+// the bug where setting ZOT_HOME breaks environment variable authentication.
+// When no provider is configured and the default provider (anthropic) has no
+// credentials, Resolve should fall back to ANY provider that has credentials
+// via environment variables, including amazon-bedrock and other providers.
+func TestResolveEnvironmentVariableAuthWithoutConfiguredProvider(t *testing.T) {
+	t.Setenv("ZOT_HOME", t.TempDir())
+	// No ANTHROPIC credentials set
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	// Test case 1: amazon-bedrock via environment variables
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-token-123")
+	t.Setenv("AWS_REGION", "us-east-1")
+
+	// No config.json created yet (fresh ZOT_HOME)
+	// Resolve should NOT error and should detect bedrock credentials
+	r, err := Resolve(Args{}, false)
+	if err != nil {
+		t.Fatalf("Resolve failed with bedrock env vars set: %v", err)
+	}
+	if r.Provider != "amazon-bedrock" {
+		t.Errorf("Resolve with bedrock env var: got provider %q, want amazon-bedrock", r.Provider)
+	}
+	if !r.HasCredential() {
+		t.Errorf("Resolve should have found bedrock credential from environment variable")
+	}
+}
+
+// TestResolveFallsBackThroughAllKnownProviders ensures that when the
+// default provider has no credentials, Resolve tries all known providers
+// (not just a hardcoded subset) to find one with available credentials.
+// We test with github-copilot which was NOT in the old hardcoded list.
+func TestResolveFallsBackThroughAllKnownProviders(t *testing.T) {
+	t.Setenv("ZOT_HOME", t.TempDir())
+	// Clear anthropic credentials
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "")
+	// Clear openai credentials
+	t.Setenv("OPENAI_API_KEY", "")
+	// Clear amazon-bedrock (since it comes first in knownProviders)
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_PROFILE", "")
+
+	// Set github-copilot, which was NOT in the old hardcoded list
+	t.Setenv("COPILOT_GITHUB_TOKEN", "copilot-token-789")
+
+	r, err := Resolve(Args{}, false)
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	if r.Provider != "github-copilot" {
+		t.Errorf("Resolve should have found github-copilot in fallback chain, got %q", r.Provider)
+	}
+}

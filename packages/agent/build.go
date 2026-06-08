@@ -317,8 +317,8 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 	// never shows a "not logged in" banner.
 	userPickedProvider := args.Provider != ""
 	if credErr != nil && !userPickedProvider && provName != "ollama" {
-		for _, other := range []string{"anthropic", "openai", "openai-codex", "kimi", "deepseek", "google"} {
-			if other == provName {
+		for _, other := range knownProviders {
+			if other == provName || other == "ollama" {
 				continue
 			}
 			if c, m, a, err := ResolveCredentialFull(other, args.APIKey); err == nil {
