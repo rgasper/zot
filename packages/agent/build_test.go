@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,5 +210,71 @@ func TestCanonicalProviderAliasesAreKnown(t *testing.T) {
 		if !isKnownProvider(canon) {
 			t.Errorf("alias %q maps to %q which is not a known provider", alias, canon)
 		}
+	}
+}
+
+func TestResolveInsecureOnlyWithExplicitBaseURL(t *testing.T) {
+	orig := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = orig })
+
+	t.Setenv("ZOT_HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	resolved, err := Resolve(Args{Provider: "moonshotai", InsecureTLS: true}, false)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if resolved.InsecureTLS {
+		t.Fatal("InsecureTLS must not be set for built-in provider base URLs")
+	}
+	assertDefaultTransportStillSecure(t)
+
+	resolved, err = Resolve(Args{Provider: "openai", InsecureTLS: true, BaseURL: "https://my-llm.internal/v1"}, false)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !resolved.InsecureTLS {
+		t.Fatal("InsecureTLS must be set with --insecure and explicit --base-url")
+	}
+	assertDefaultTransportStillSecure(t)
+}
+
+func TestResolveInsecureFromConfigRequiresExplicitBaseURL(t *testing.T) {
+	orig := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = orig })
+
+	t.Setenv("ZOT_HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	if err := SaveConfig(Config{Provider: "openai", Insecure: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := Resolve(Args{Provider: "openai"}, false)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if resolved.InsecureTLS {
+		t.Fatal("InsecureTLS must not be set without a custom base URL")
+	}
+	assertDefaultTransportStillSecure(t)
+
+	resolved, err = Resolve(Args{Provider: "openai", BaseURL: "https://my-llm.internal/v1"}, false)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !resolved.InsecureTLS {
+		t.Fatal("InsecureTLS must be set when config insecure=true and --base-url is provided")
+	}
+	assertDefaultTransportStillSecure(t)
+}
+
+func assertDefaultTransportStillSecure(t *testing.T) {
+	t.Helper()
+	tr, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return
+	}
+	if tr.TLSClientConfig != nil && tr.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("http.DefaultTransport must not be made insecure")
 	}
 }
