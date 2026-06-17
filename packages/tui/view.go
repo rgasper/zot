@@ -622,7 +622,16 @@ func (v *View) renderMessage(m provider.Message, width int, turnOpen bool) []str
 					}
 				}
 			case provider.ImageBlock:
-				bubble = append(bubble, row(fmt.Sprintf("[image %s, %d bytes]", b.MimeType, len(b.Data))))
+				// Flush any text rows accumulated so far before the image.
+				if len(bubble) > 0 {
+					lines = append(lines, row(""))
+					lines = append(lines, bubble...)
+					bubble = bubble[:0]
+				}
+				// Image rows carry imageFootprintSentinel tags and must be
+				// emitted bare — wrapping them in the bubble row() closure
+				// would corrupt the inline-image escape sequences.
+				lines = append(lines, v.renderImageBlock(b, width)...)
 			}
 		}
 		if len(bubble) > 0 {
